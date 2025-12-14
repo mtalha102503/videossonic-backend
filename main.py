@@ -1,13 +1,15 @@
-from fastapi.responses import FileResponse
-import os
-import time
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yt_dlp
+import os
+import time
+import glob
 
 app = FastAPI()
 
+# CORS Setup (Mobile/Browser connection ke liye)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,39 +18,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class InfoRequest(BaseModel):
-    url: str
-
 class DownloadRequest(BaseModel):
     url: str
-    quality: str  # 'high', 'medium', 'low', 'audio'
+    quality: str = "medium"
 
-# 1. Sirf Info lane ke liye API
 @app.post("/get-info")
-async def get_info(request: InfoRequest):
-    ydl_opts = {'quiet': True}
+async def get_info(request: DownloadRequest):
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        # Fake Browser Headers (YouTube ko dhoka dene ke liye)
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        }
+    }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=False)
             return {
                 "status": "success",
-                "title": info.get('title'),
-                "thumbnail": info.get('thumbnail'),
-                "platform": info.get('extractor_key')
+                "title": info.get('title', 'Unknown Title'),
+                "thumbnail": info.get('thumbnail', ''),
+                "duration": info.get('duration', 0)
             }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# 2. Asal Download ke liye API
-# Is function ko replace karein
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
+    # Downloads folder check
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
 
+    # Purani files delete karein (Server clean rakhne ke liye)
+    files = glob.glob('downloads/*')
+    for f in files:
+        try:
+            os.remove(f)
+        except:
+            pass
+
     timestamp = int(time.time())
     
-    # Quality Settings (Wahi purani wali)
+    # Quality Settings
     if request.quality == 'audio':
         format_str = 'bestaudio/best'
         output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
@@ -66,25 +78,26 @@ async def download_video(request: DownloadRequest):
         output_path = f"downloads/%(title)s_High_{timestamp}.%(ext)s"
         postprocessors = []
 
-    # --- UPDATE: RETRY LOGIC ADDED HERE ---
+    # --- MAIN SETTINGS FOR YOUTUBE ---
     ydl_opts = {
         'outtmpl': output_path,
         'format': format_str,
-        'quiet': False,
         'noplaylist': True,
-        'updatetime': False,
         'postprocessors': postprocessors,
-        'source_address': '0.0.0.0',
+        'quiet': False,
+        'no_warnings': True,
+        'nocheckcertificate': True, # Certificate errors ignore karo
+        'ignoreerrors': True,       # Choti moti errors ignore karo
         
-        # Ye nayi lines hain jo error rokengi:
-        'retries': 10,              # Agar fail ho to 10 baar try karo
-        'fragment_retries': 10,     # Agar video ka tukda fail ho to retry karo
-        'socket_timeout': 30,       # 30 second tak wait karo
-        'ignoreerrors': True        # Choti moti errors ko ignore karo
+        # Ye sabse zaroori hai (Fake Identity):
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+        }
     }
 
     try:
-        print(f"Downloading {request.quality} quality...")
         filename = ""
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=True)
@@ -93,12 +106,15 @@ async def download_video(request: DownloadRequest):
             if request.quality == 'audio':
                 filename = filename.rsplit('.', 1)[0] + '.mp3'
 
-        # Check karein ke file bani bhi hai ya nahi (Retry ke baad)
         if not filename or not os.path.exists(filename):
-             return {"status": "error", "message": "Download failed after retries. Internet unstable?"}
+             return {"status": "error", "message": "Download failed. Try again."}
 
+        # Mobile ko file bhejo
         return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
     except Exception as e:
-        print(f"Error: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
