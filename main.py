@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -9,7 +9,6 @@ import glob
 
 app = FastAPI()
 
-# CORS Setup (Mobile/Browser connection ke liye)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,10 +25,9 @@ class DownloadRequest(BaseModel):
 async def get_info(request: DownloadRequest):
     ydl_opts = {
         'quiet': True,
-        'no_warnings': True,
-        # Fake Browser Headers (YouTube ko dhoka dene ke liye)
+        'nocheckcertificate': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
         }
     }
     try:
@@ -46,11 +44,10 @@ async def get_info(request: DownloadRequest):
 
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
-    # Downloads folder check
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
 
-    # Purani files delete karein (Server clean rakhne ke liye)
+    # Purani files safai
     files = glob.glob('downloads/*')
     for f in files:
         try:
@@ -78,22 +75,25 @@ async def download_video(request: DownloadRequest):
         output_path = f"downloads/%(title)s_High_{timestamp}.%(ext)s"
         postprocessors = []
 
-    # --- MAIN SETTINGS FOR YOUTUBE ---
+    # --- ANDROID MODE SETTINGS ---
     ydl_opts = {
         'outtmpl': output_path,
         'format': format_str,
         'noplaylist': True,
-        'postprocessors': postprocessors,
-        'quiet': False,
-        'no_warnings': True,
-        'nocheckcertificate': True, # Certificate errors ignore karo
-        'ignoreerrors': True,       # Choti moti errors ignore karo
+        'nocheckcertificate': True,
+        'ignoreerrors': True,
+        'source_address': '0.0.0.0', # Force IPv4
         
-        # Ye sabse zaroori hai (Fake Identity):
+        # JADU YAHAN HAI (YouTube ko lagega ye Mobile App hai):
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web']
+            }
+        },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
     }
 
@@ -107,9 +107,8 @@ async def download_video(request: DownloadRequest):
                 filename = filename.rsplit('.', 1)[0] + '.mp3'
 
         if not filename or not os.path.exists(filename):
-             return {"status": "error", "message": "Download failed. Try again."}
+             return {"status": "error", "message": "Download failed. YouTube is blocking Cloud IPs."}
 
-        # Mobile ko file bhejo
         return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
     except Exception as e:
