@@ -23,11 +23,15 @@ class DownloadRequest(BaseModel):
 
 @app.post("/get-info")
 async def get_info(request: DownloadRequest):
+    # Cookies file check
+    cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
+    
     ydl_opts = {
         'quiet': True,
         'nocheckcertificate': True,
+        'cookiefile': cookie_file, # <--- YE HAI JAADU 🍪
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
     }
     try:
@@ -47,53 +51,35 @@ async def download_video(request: DownloadRequest):
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
 
-    # Purani files safai
     files = glob.glob('downloads/*')
     for f in files:
-        try:
-            os.remove(f)
-        except:
-            pass
+        try: os.remove(f)
+        except: pass
 
     timestamp = int(time.time())
     
-    # Quality Settings
+    # Quality logic
     if request.quality == 'audio':
         format_str = 'bestaudio/best'
         output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
         postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
-    elif request.quality == 'low':
-        format_str = 'worstvideo[height>=360]+worstaudio/worst[height>=360]'
-        output_path = f"downloads/%(title)s_Low_{timestamp}.%(ext)s"
-        postprocessors = []
-    elif request.quality == 'medium':
-        format_str = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-        output_path = f"downloads/%(title)s_Medium_{timestamp}.%(ext)s"
-        postprocessors = []
     else: 
         format_str = 'bestvideo+bestaudio/best'
-        output_path = f"downloads/%(title)s_High_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
         postprocessors = []
 
-    # --- ANDROID MODE SETTINGS ---
+    # Check cookies
+    cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
+
     ydl_opts = {
         'outtmpl': output_path,
         'format': format_str,
         'noplaylist': True,
         'nocheckcertificate': True,
         'ignoreerrors': True,
-        'source_address': '0.0.0.0', # Force IPv4
-        
-        # JADU YAHAN HAI (YouTube ko lagega ye Mobile App hai):
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web']
-            }
-        },
+        'cookiefile': cookie_file,  # <--- COOKIES ADDED HERE 🍪
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
     }
 
@@ -102,12 +88,11 @@ async def download_video(request: DownloadRequest):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=True)
             filename = ydl.prepare_filename(info)
-            
             if request.quality == 'audio':
                 filename = filename.rsplit('.', 1)[0] + '.mp3'
 
         if not filename or not os.path.exists(filename):
-             return {"status": "error", "message": "Download failed. YouTube is blocking Cloud IPs."}
+             return {"status": "error", "message": "Download failed. IP Blocked by YouTube."}
 
         return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
