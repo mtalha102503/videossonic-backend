@@ -46,7 +46,8 @@ async def get_info(request: DownloadRequest):
                 "duration": info.get('duration', 0)
             }
     except Exception as e:
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
+        # Return 200 so frontend can display the error message
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
 
 # 4. Download Route (DEBUG MODE ENABLED 🛠️)
 @app.post("/download-video")
@@ -93,8 +94,8 @@ async def download_video(request: DownloadRequest):
             'merge_output_format': 'mp4', # Force MP4
             'noplaylist': True,
             'nocheckcertificate': True,
-            'ignoreerrors': False, # <--- CHANGED: Ab Errors Chupayega Nahi 🛑
-            'logtostderr': True,   # <--- CHANGED: Render Logs me error dikhega
+            'ignoreerrors': False, # Keep False to catch real errors
+            'logtostderr': True,
             'postprocessors': postprocessors,
             'cookiefile': cookie_file,
             'http_headers': {
@@ -107,20 +108,21 @@ async def download_video(request: DownloadRequest):
             ydl.download([request.url])
 
         # STEP 3: FIND FILE
+        time.sleep(0.5) # Wait for file system
         list_of_files = glob.glob('downloads/*') 
         
         if not list_of_files:
-             # Agar yahan pohnche, matlab yt-dlp fail nahi hua par file bhi nahi bani (Rare)
-             return JSONResponse(content={"status": "error", "message": "Download finished but no file created. Check format availability."}, status_code=500)
+             # Agar yahan pohnche, matlab yt-dlp fail nahi hua par file bhi nahi bani
+             return JSONResponse(content={"status": "error", "message": "Download failed. Server IP might be blocked or format unavailable."}, status_code=200)
         
         final_file = max(list_of_files, key=os.path.getctime)
         
         return FileResponse(path=final_file, filename=os.path.basename(final_file), media_type='application/octet-stream')
 
     except Exception as e:
-        # Ab Asal Error Frontend Par Jayega
+        # Ab Asal Error Frontend Par Jayega (Status 200 ke sath)
         print(f"Server Error Details: {str(e)}")
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
 
 if __name__ == "__main__":
     import uvicorn
