@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -9,7 +9,7 @@ import glob
 
 app = FastAPI()
 
-# CORS Setup
+# CORS Setup (Browser Connection)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,7 +20,7 @@ app.add_middleware(
 
 class DownloadRequest(BaseModel):
     url: str
-    quality: str = "1080" # Default value
+    quality: str = "1080" # Default
 
 @app.post("/get-info")
 async def get_info(request: DownloadRequest):
@@ -45,85 +45,80 @@ async def get_info(request: DownloadRequest):
                 "duration": info.get('duration', 0)
             }
     except Exception as e:
-        print(f"Info Error: {str(e)}")
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
 
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
-    try:
-        if not os.path.exists('downloads'):
-            os.makedirs('downloads')
+    # 1. Folder Check
+    if not os.path.exists('downloads'):
+        os.makedirs('downloads')
 
-        # Purani files safai (Cleanup)
+    # 2. Cleanup (Purani files delete)
+    try:
         files = glob.glob('downloads/*')
         for f in files:
-            try: os.remove(f)
-            except: pass
+            os.remove(f)
+    except:
+        pass
 
-        timestamp = int(time.time())
-        q = str(request.quality) # Ensure string
-        
-        # --- ROBUST QUALITY LOGIC ---
-        postprocessors = []
-        format_str = 'bestvideo+bestaudio/best' # Default fallback
-        
-        if q == 'audio':
-            format_str = 'bestaudio/best'
-            output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
-            postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
-        elif q == '360':
-            # Tries to get video with height <= 360, fallback to best audio/video if specific height fails but keeps constraints
-            format_str = 'bestvideo[height<=360]+bestaudio/best[height<=360]'
-            output_path = f"downloads/%(title)s_360p_{timestamp}.%(ext)s"
-        elif q == '480':
-            format_str = 'bestvideo[height<=480]+bestaudio/best[height<=480]'
-            output_path = f"downloads/%(title)s_480p_{timestamp}.%(ext)s"
-        elif q == '720':
-            format_str = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-            output_path = f"downloads/%(title)s_720p_{timestamp}.%(ext)s"
-        elif q == '1080':
-            format_str = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
-            output_path = f"downloads/%(title)s_1080p_{timestamp}.%(ext)s"
-        else: 
-            # Default High (Full Original Quality)
-            format_str = 'bestvideo+bestaudio/best'
-            output_path = f"downloads/%(title)s_HD_{timestamp}.%(ext)s"
+    timestamp = int(time.time())
+    q = str(request.quality)
+    
+    # 3. Quality Settings (Simplified Logic)
+    postprocessors = []
+    
+    # Default Format (Best Quality)
+    format_str = 'bestvideo+bestaudio/best'
+    output_path = f"downloads/%(title)s_HD_{timestamp}.%(ext)s"
 
-        # Cookies check
-        cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
+    if q == 'audio':
+        format_str = 'bestaudio/best'
+        output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
+        postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
+    
+    elif q in ['360', '480', '720', '1080']:
+        # Resolution logic: Try to get specific height, fallback to best if not available
+        format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]'
+        output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
 
-        ydl_opts = {
-            'outtmpl': output_path,
-            'format': format_str,
-            'noplaylist': True,
-            'nocheckcertificate': True,
-            'ignoreerrors': True,
-            'postprocessors': postprocessors,
-            'cookiefile': cookie_file,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            }
+    # 4. Cookies Check
+    cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
+
+    ydl_opts = {
+        'outtmpl': output_path,
+        'format': format_str,
+        'noplaylist': True,
+        'nocheckcertificate': True,
+        'ignoreerrors': True,
+        'postprocessors': postprocessors,
+        'cookiefile': cookie_file,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
+    }
 
+    try:
         filename = ""
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=True)
             filename = ydl.prepare_filename(info)
             
-            # Handle MP3 Extension Change
+            # Agar MP3 hai to extension change karo
             if q == 'audio':
                 base, _ = os.path.splitext(filename)
                 filename = base + ".mp3"
 
+        # 5. File Verification
         if not filename or not os.path.exists(filename):
-             print("Error: File not found after download.")
              return JSONResponse(content={"status": "error", "message": "Download failed. Please try again."}, status_code=500)
 
+        # 6. Send File to User
         return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
     except Exception as e:
-        print(f"Download Error: {str(e)}")
-        return JSONResponse(content={"status": "error", "message": f"Server Error: {str(e)}"}, status_code=500)
+        # Error handling
+        print(f"Error: {str(e)}")
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
     import uvicorn
