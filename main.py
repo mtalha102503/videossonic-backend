@@ -21,7 +21,7 @@ app.add_middleware(
 # 2. Data Model
 class DownloadRequest(BaseModel):
     url: str
-    quality: str = "best" # Default value
+    quality: str = "best"
 
 # 3. Get Info Route
 @app.post("/get-info")
@@ -48,7 +48,7 @@ async def get_info(request: DownloadRequest):
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
 
-# 4. Download Route (FIXED LOGIC)
+# 4. Download Route (BULLETPROOF LOGIC)
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
     try:
@@ -64,10 +64,9 @@ async def download_video(request: DownloadRequest):
         timestamp = int(time.time())
         q = str(request.quality)
         
-        # --- FIXED QUALITY LOGIC ---
-        # Initialize variables first to avoid errors
+        # --- QUALITY SETTINGS ---
         postprocessors = []
-        format_str = 'bestvideo+bestaudio/best' # Fallback
+        format_str = 'bestvideo+bestaudio/best' # Default
         output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
 
         if q == 'audio':
@@ -76,17 +75,16 @@ async def download_video(request: DownloadRequest):
             postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
         
         elif q in ['360', '480', '720', '1080']:
-            # Exact resolution logic
+            # Try to get specific height, else best available
             format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]'
             output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
         
-        # Cookies check
         cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
 
         ydl_opts = {
             'outtmpl': output_path,
             'format': format_str,
-            'merge_output_format': 'mp4', # Ensure MP4 for videos
+            'merge_output_format': 'mp4', # Force MP4 container
             'noplaylist': True,
             'nocheckcertificate': True,
             'ignoreerrors': True,
@@ -102,24 +100,31 @@ async def download_video(request: DownloadRequest):
             info = ydl.extract_info(request.url, download=True)
             filename = ydl.prepare_filename(info)
             
-            # MP3 Extension Fix
-            if q == 'audio':
-                base, _ = os.path.splitext(filename)
-                filename = base + ".mp3"
-            # MP4 Extension Fix (If merged)
-            elif q != 'audio' and not filename.endswith('.mp4'):
-                 base, _ = os.path.splitext(filename)
-                 if os.path.exists(base + ".mp4"):
-                     filename = base + ".mp4"
+            # --- SMART FILE FINDER (Fix for Server Error) ---
+            # Agar file exist nahi karti (extension change hone ki wajah se)
+            if not os.path.exists(filename):
+                base = os.path.splitext(filename)[0]
+                # Check karo kya MP4 ban gayi hai?
+                if os.path.exists(base + ".mp4"):
+                    filename = base + ".mp4"
+                # Check karo kya MP3 ban gayi hai?
+                elif os.path.exists(base + ".mp3"):
+                    filename = base + ".mp3"
+            
+            # Agar abhi bhi filename MP3 hona chahiye tha par extension purani hai
+            if q == 'audio' and not filename.endswith('.mp3'):
+                 base = os.path.splitext(filename)[0]
+                 if os.path.exists(base + ".mp3"):
+                     filename = base + ".mp3"
 
-        # Verification
+        # Final Verification
         if not filename or not os.path.exists(filename):
-             return JSONResponse(content={"status": "error", "message": "Download failed. Format not available."}, status_code=500)
+             return JSONResponse(content={"status": "error", "message": "Download failed. File not found on server."}, status_code=500)
 
         return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
     except Exception as e:
-        print(f"Server Error: {str(e)}")
+        print(f"Error: {str(e)}")
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
