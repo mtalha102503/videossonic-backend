@@ -66,9 +66,10 @@ async def download_video(request: DownloadRequest):
         timestamp = int(time.time())
         q = str(request.quality)
         
-        # --- QUALITY LOGIC ---
+        # --- QUALITY LOGIC (SMART FALLBACK) ---
         postprocessors = []
-        format_str = 'bestvideo+bestaudio/best' # Default
+        # Default strategy: Try Best Video+Audio, fallback to Best Single File
+        format_str = 'bestvideo+bestaudio/best' 
         output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
 
         if q == 'audio':
@@ -77,7 +78,15 @@ async def download_video(request: DownloadRequest):
             postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
         
         elif q in ['360', '480', '720', '1080']:
-            format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]'
+            # LOGIC:
+            # 1. Try Specific Height (Merged)
+            # 2. Try Specific Height (Single File)
+            # 3. FALLBACK: Best Merged (agar specific na mile)
+            # 4. FALLBACK: Best Single (agar kuch na mile)
+            format_str = (
+                f'bestvideo[height<={q}]+bestaudio/best[height<={q}]/'
+                'bestvideo+bestaudio/best'
+            )
             output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
         
         # Check Cookies explicitly
