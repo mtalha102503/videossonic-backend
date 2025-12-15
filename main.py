@@ -6,10 +6,10 @@ import yt_dlp
 import os
 import time
 import glob
+import random
 
 app = FastAPI()
 
-# 1. CORS Setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,12 +18,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Data Model
 class DownloadRequest(BaseModel):
     url: str
     quality: str = "best"
 
-# 3. Get Info Route
+# --- FAKE IPHONE HEADERS ---
+# Ye headers Instagram ko dhoka denge
+IPHONE_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'TE': 'trailers'
+}
+
 @app.post("/get-info")
 async def get_info(request: DownloadRequest):
     cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
@@ -32,8 +46,11 @@ async def get_info(request: DownloadRequest):
         'quiet': True,
         'nocheckcertificate': True,
         'cookiefile': cookie_file,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'http_headers': IPHONE_HEADERS, # <--- IPHONE HEADERS
+        'extractor_args': {
+            'instagram': {
+                'max_comments': ['0'] # Comments mat lao, fast chalega
+            }
         }
     }
     try:
@@ -46,18 +63,14 @@ async def get_info(request: DownloadRequest):
                 "duration": info.get('duration', 0)
             }
     except Exception as e:
-        # Return 200 so frontend can display the error message
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
 
-# 4. Download Route (DEBUG MODE ENABLED 🛠️)
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
     try:
-        # Folder Check
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
 
-        # STEP 1: SAFAI (Folder khali karo)
         files = glob.glob('downloads/*')
         for f in files:
             try: os.remove(f)
@@ -66,50 +79,32 @@ async def download_video(request: DownloadRequest):
         timestamp = int(time.time())
         q = str(request.quality)
         
-        # --- QUALITY LOGIC (SMART FALLBACK) ---
+        # --- QUALITY LOGIC ---
         postprocessors = []
-        # Default strategy: Try Best Video+Audio, fallback to Best Single File
-        format_str = 'bestvideo+bestaudio/best' 
+        format_str = 'bestvideo+bestaudio/best'
         output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
 
         if q == 'audio':
             format_str = 'bestaudio/best'
             output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
             postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
-        
         elif q in ['360', '480', '720', '1080']:
-            # LOGIC:
-            # 1. Try Specific Height (Merged)
-            # 2. Try Specific Height (Single File)
-            # 3. FALLBACK: Best Merged (agar specific na mile)
-            # 4. FALLBACK: Best Single (agar kuch na mile)
-            format_str = (
-                f'bestvideo[height<={q}]+bestaudio/best[height<={q}]/'
-                'bestvideo+bestaudio/best'
-            )
+            format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]/bestvideo+bestaudio/best'
             output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
         
-        # Check Cookies explicitly
-        if os.path.exists('cookies.txt'):
-            cookie_file = 'cookies.txt'
-            print("🍪 Cookies Found & Loaded") 
-        else:
-            cookie_file = None
-            print("⚠️ No Cookies Found")
+        cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
 
         ydl_opts = {
             'outtmpl': output_path,
             'format': format_str,
-            'merge_output_format': 'mp4', # Force MP4
+            'merge_output_format': 'mp4',
             'noplaylist': True,
             'nocheckcertificate': True,
-            'ignoreerrors': False, # Keep False to catch real errors
+            'ignoreerrors': False,
             'logtostderr': True,
             'postprocessors': postprocessors,
             'cookiefile': cookie_file,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            }
+            'http_headers': IPHONE_HEADERS, # <--- IPHONE HEADERS
         }
 
         # STEP 2: DOWNLOAD
@@ -117,20 +112,16 @@ async def download_video(request: DownloadRequest):
             ydl.download([request.url])
 
         # STEP 3: FIND FILE
-        time.sleep(0.5) # Wait for file system
         list_of_files = glob.glob('downloads/*') 
-        
         if not list_of_files:
-             # Agar yahan pohnche, matlab yt-dlp fail nahi hua par file bhi nahi bani
-             return JSONResponse(content={"status": "error", "message": "Download failed. Server IP might be blocked or format unavailable."}, status_code=200)
+             return JSONResponse(content={"status": "error", "message": "Download failed. Instagram Rate Limit."}, status_code=200)
         
         final_file = max(list_of_files, key=os.path.getctime)
         
         return FileResponse(path=final_file, filename=os.path.basename(final_file), media_type='application/octet-stream')
 
     except Exception as e:
-        # Ab Asal Error Frontend Par Jayega (Status 200 ke sath)
-        print(f"Server Error Details: {str(e)}")
+        print(f"Error: {str(e)}")
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
 
 if __name__ == "__main__":
