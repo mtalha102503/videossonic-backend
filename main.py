@@ -9,7 +9,6 @@ import glob
 
 app = FastAPI()
 
-# CORS Setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,17 +19,17 @@ app.add_middleware(
 
 class DownloadRequest(BaseModel):
     url: str
-    quality: str = "1080" # Default value updated
+    quality: str = "medium"
 
 @app.post("/get-info")
 async def get_info(request: DownloadRequest):
-    # Cookie check
+    # Agar cookies file hai to use karo
     cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
     
     ydl_opts = {
         'quiet': True,
         'nocheckcertificate': True,
-        'cookiefile': cookie_file,
+        'cookiefile': cookie_file,  # <--- YAHAN HAI JADU 🍪
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
@@ -52,42 +51,23 @@ async def download_video(request: DownloadRequest):
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
 
-    # Purani files safai
+    # Safai
     files = glob.glob('downloads/*')
     for f in files:
         try: os.remove(f)
         except: pass
 
     timestamp = int(time.time())
-    q = request.quality
     
-    # --- UPDATED QUALITY LOGIC ---
-    postprocessors = []
-    
-    if q == 'audio':
+    # Quality logic
+    if request.quality == 'audio':
         format_str = 'bestaudio/best'
         output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
         postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
-    elif q == '360':
-        # 360p max
-        format_str = 'bestvideo[height<=360]+bestaudio/best[height<=360]'
-        output_path = f"downloads/%(title)s_360p_{timestamp}.%(ext)s"
-    elif q == '480':
-        # 480p max
-        format_str = 'bestvideo[height<=480]+bestaudio/best[height<=480]'
-        output_path = f"downloads/%(title)s_480p_{timestamp}.%(ext)s"
-    elif q == '720':
-        # 720p max
-        format_str = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-        output_path = f"downloads/%(title)s_720p_{timestamp}.%(ext)s"
-    elif q == '1080':
-        # 1080p max
-        format_str = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
-        output_path = f"downloads/%(title)s_1080p_{timestamp}.%(ext)s"
     else: 
-        # Default High (Full Original Quality)
         format_str = 'bestvideo+bestaudio/best'
-        output_path = f"downloads/%(title)s_HD_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
+        postprocessors = []
 
     # Cookies check
     cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
@@ -98,8 +78,7 @@ async def download_video(request: DownloadRequest):
         'noplaylist': True,
         'nocheckcertificate': True,
         'ignoreerrors': True,
-        'postprocessors': postprocessors,
-        'cookiefile': cookie_file,
+        'cookiefile': cookie_file,  # <--- COOKIES ENABLED 🍪
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
@@ -114,7 +93,7 @@ async def download_video(request: DownloadRequest):
                 filename = filename.rsplit('.', 1)[0] + '.mp3'
 
         if not filename or not os.path.exists(filename):
-             return {"status": "error", "message": "Download failed. Try different quality."}
+             return {"status": "error", "message": "Download failed. Still blocked by YouTube."}
 
         return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
