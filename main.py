@@ -48,7 +48,7 @@ async def get_info(request: DownloadRequest):
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
 
-# 4. Download Route (NUCLEAR FIX ☢️)
+# 4. Download Route (DEBUG MODE ENABLED 🛠️)
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
     try:
@@ -57,7 +57,6 @@ async def download_video(request: DownloadRequest):
             os.makedirs('downloads')
 
         # STEP 1: SAFAI (Folder khali karo)
-        # Isse confirm ho jayega ke jo file bachegi wo HAMARI hai.
         files = glob.glob('downloads/*')
         for f in files:
             try: os.remove(f)
@@ -77,11 +76,16 @@ async def download_video(request: DownloadRequest):
             postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
         
         elif q in ['360', '480', '720', '1080']:
-            # Koshish karo specific height mile, warna best le lo
             format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]'
             output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
         
-        cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
+        # Check Cookies explicitly
+        if os.path.exists('cookies.txt'):
+            cookie_file = 'cookies.txt'
+            print("🍪 Cookies Found & Loaded") 
+        else:
+            cookie_file = None
+            print("⚠️ No Cookies Found")
 
         ydl_opts = {
             'outtmpl': output_path,
@@ -89,7 +93,8 @@ async def download_video(request: DownloadRequest):
             'merge_output_format': 'mp4', # Force MP4
             'noplaylist': True,
             'nocheckcertificate': True,
-            'ignoreerrors': True,
+            'ignoreerrors': False, # <--- CHANGED: Ab Errors Chupayega Nahi 🛑
+            'logtostderr': True,   # <--- CHANGED: Render Logs me error dikhega
             'postprocessors': postprocessors,
             'cookiefile': cookie_file,
             'http_headers': {
@@ -101,20 +106,20 @@ async def download_video(request: DownloadRequest):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([request.url])
 
-        # STEP 3: FIND FILE (The Genius Part 🧠)
-        # Naam guess karne ke bajaye, hum folder check karenge
+        # STEP 3: FIND FILE
         list_of_files = glob.glob('downloads/*') 
         
         if not list_of_files:
-             return JSONResponse(content={"status": "error", "message": "Download failed. No file found."}, status_code=500)
+             # Agar yahan pohnche, matlab yt-dlp fail nahi hua par file bhi nahi bani (Rare)
+             return JSONResponse(content={"status": "error", "message": "Download finished but no file created. Check format availability."}, status_code=500)
         
-        # Jo bhi file mili, wahi hamari hero hai
         final_file = max(list_of_files, key=os.path.getctime)
         
         return FileResponse(path=final_file, filename=os.path.basename(final_file), media_type='application/octet-stream')
 
     except Exception as e:
-        print(f"Server Error: {str(e)}")
+        # Ab Asal Error Frontend Par Jayega
+        print(f"Server Error Details: {str(e)}")
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
