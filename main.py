@@ -48,14 +48,16 @@ async def get_info(request: DownloadRequest):
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
 
-# 4. Download Route (BULLETPROOF LOGIC)
+# 4. Download Route (NUCLEAR FIX ☢️)
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
     try:
+        # Folder Check
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
 
-        # Safai
+        # STEP 1: SAFAI (Folder khali karo)
+        # Isse confirm ho jayega ke jo file bachegi wo HAMARI hai.
         files = glob.glob('downloads/*')
         for f in files:
             try: os.remove(f)
@@ -64,7 +66,7 @@ async def download_video(request: DownloadRequest):
         timestamp = int(time.time())
         q = str(request.quality)
         
-        # --- QUALITY SETTINGS ---
+        # --- QUALITY LOGIC ---
         postprocessors = []
         format_str = 'bestvideo+bestaudio/best' # Default
         output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
@@ -75,7 +77,7 @@ async def download_video(request: DownloadRequest):
             postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
         
         elif q in ['360', '480', '720', '1080']:
-            # Try to get specific height, else best available
+            # Koshish karo specific height mile, warna best le lo
             format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]'
             output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
         
@@ -84,7 +86,7 @@ async def download_video(request: DownloadRequest):
         ydl_opts = {
             'outtmpl': output_path,
             'format': format_str,
-            'merge_output_format': 'mp4', # Force MP4 container
+            'merge_output_format': 'mp4', # Force MP4
             'noplaylist': True,
             'nocheckcertificate': True,
             'ignoreerrors': True,
@@ -95,36 +97,24 @@ async def download_video(request: DownloadRequest):
             }
         }
 
-        filename = ""
+        # STEP 2: DOWNLOAD
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(request.url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            # --- SMART FILE FINDER (Fix for Server Error) ---
-            # Agar file exist nahi karti (extension change hone ki wajah se)
-            if not os.path.exists(filename):
-                base = os.path.splitext(filename)[0]
-                # Check karo kya MP4 ban gayi hai?
-                if os.path.exists(base + ".mp4"):
-                    filename = base + ".mp4"
-                # Check karo kya MP3 ban gayi hai?
-                elif os.path.exists(base + ".mp3"):
-                    filename = base + ".mp3"
-            
-            # Agar abhi bhi filename MP3 hona chahiye tha par extension purani hai
-            if q == 'audio' and not filename.endswith('.mp3'):
-                 base = os.path.splitext(filename)[0]
-                 if os.path.exists(base + ".mp3"):
-                     filename = base + ".mp3"
+            ydl.download([request.url])
 
-        # Final Verification
-        if not filename or not os.path.exists(filename):
-             return JSONResponse(content={"status": "error", "message": "Download failed. File not found on server."}, status_code=500)
-
-        return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
+        # STEP 3: FIND FILE (The Genius Part 🧠)
+        # Naam guess karne ke bajaye, hum folder check karenge
+        list_of_files = glob.glob('downloads/*') 
+        
+        if not list_of_files:
+             return JSONResponse(content={"status": "error", "message": "Download failed. No file found."}, status_code=500)
+        
+        # Jo bhi file mili, wahi hamari hero hai
+        final_file = max(list_of_files, key=os.path.getctime)
+        
+        return FileResponse(path=final_file, filename=os.path.basename(final_file), media_type='application/octet-stream')
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Server Error: {str(e)}")
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
