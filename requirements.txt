@@ -3,3 +3,4 @@ uvicorn
 python-multipart
 requests
 git+https://github.com/yt-dlp/yt-dlp.git@master
+
