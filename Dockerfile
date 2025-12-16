@@ -1,29 +1,25 @@
 FROM python:3.9-slim
 
-# 1. System Tools (FFmpeg + Curl + Unzip zaroori hain)
+# 1. System Tools (FFmpeg + Git zaroori hain)
 RUN apt-get update && \
-    apt-get install -y ffmpeg curl unzip && \
+    apt-get install -y ffmpeg git && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 2. Basic Requirements Install karein (yt-dlp ke ilawa)
-COPY requirements.txt .
+# 2. Pip Upgrade (Zaroori hai taake error na aaye)
 RUN pip install --no-cache-dir --upgrade pip
+
+# 3. Basic Requirements Install
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. ROBUST INSTALL: Download & Install yt-dlp from Zip (No Git needed)
-# Pehle zip download karo
-RUN curl -L -o yt-dlp.zip https://github.com/yt-dlp/yt-dlp/archive/master.zip
-# Phir unzip karo
-RUN unzip yt-dlp.zip
-# Folder ka naam 'yt-dlp-master' hota hai, wahan se install karo
-RUN pip install --no-cache-dir ./yt-dlp-master
-# Safai (Zip aur folder delete karo)
-RUN rm -rf yt-dlp.zip yt-dlp-master
+# 4. FINAL SOLUTION: Install yt-dlp directly from Master ZIP via Pip
+# Ye command sabse stable hai. Ye latest code uthayegi aur khud install karegi.
+RUN pip install --no-cache-dir --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
 
-# 4. Baaki Code Copy
+# 5. Copy Code
 COPY . .
 
-# 5. Server Start
+# 6. Server Start
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
