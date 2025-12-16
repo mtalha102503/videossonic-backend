@@ -1,7 +1,9 @@
 FROM python:3.9-slim
 
-# FFmpeg install karna zaroori hai
-RUN apt-get update && apt-get install -y ffmpeg
+# System updates + FFmpeg + Git (Zaroori hai latest update ke liye)
+RUN apt-get update && \
+    apt-get install -y ffmpeg git && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
