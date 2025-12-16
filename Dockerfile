@@ -14,9 +14,9 @@ RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. FINAL SOLUTION: Install yt-dlp directly from Master ZIP via Pip
-# Ye command sabse stable hai. Ye latest code uthayegi aur khud install karegi.
-RUN pip install --no-cache-dir --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
+# 4. FINAL SOLUTION: Install yt-dlp + Helper Libraries (Brotli & PyCryptodomex)
+# Ye libraries Facebook/TikTok ki encryption todne mein madad karti hain.
+RUN pip install --no-cache-dir --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip pycryptodomex brotli
 
 # 5. Copy Code
 COPY . .
