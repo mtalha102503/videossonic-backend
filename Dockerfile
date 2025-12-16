@@ -1,18 +1,21 @@
 FROM python:3.9-slim
 
-# System updates + FFmpeg + Git (Zaroori hai latest update ke liye)
+# 1. System Tools (FFmpeg + Curl zaroori hai)
 RUN apt-get update && \
-    apt-get install -y ffmpeg git && \
+    apt-get install -y ffmpeg curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Requirements install karein
+# 2. Basic Requirements Install karein
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Baaki code copy karein
+# 3. MAGIC STEP: YT-DLP ko Seedha Master Branch se Install karo (Zip Method)
+# Ye tareeqa "git" command se zyada reliable hai
+RUN pip install --no-cache-dir --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
+
+# 4. Baaki Code Copy
 COPY . .
 
-# Server start karein
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 5. Server Start
