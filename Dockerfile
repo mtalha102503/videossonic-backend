@@ -1,49 +1,16 @@
-FROM python:3.11-slim
+FROM python:3.9-slim
 
-# 1. System Tools: FFmpeg, Git, Curl, AtomicParsley ke sath TOR aur PRIVOXY add kiya
-# Tor: IP chupane ke liye
-# Privoxy: Tor ko HTTP proxy ki tarah use karne ke liye
-RUN apt-get update && \
-    apt-get install -y ffmpeg git curl atomicparsley tor privoxy && \
-    rm -rf /var/lib/apt/lists/*
+# FFmpeg install karna zaroori hai
+RUN apt-get update && apt-get install -y ffmpeg
 
 WORKDIR /app
 
-# 2. Configure Tor & Privoxy (Ghost Setup)
-# Privoxy ko Tor (port 9050) se connect karte hain
-RUN echo "forward-socks5t / 127.0.0.1:9050 ." >> /etc/privoxy/config
-# Privoxy port 8118 par chalega
-RUN sed -i 's/listen-address  127.0.0.1:8118/listen-address  0.0.0.0:8118/' /etc/privoxy/config
-
-# 3. Pip Upgrade
-RUN pip install --no-cache-dir --upgrade pip
-
-# 4. Basic Requirements Install
+# Requirements install karein
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 5. Install yt-dlp + Helper Libraries
-RUN pip install --no-cache-dir --force-reinstall \
-    https://github.com/yt-dlp/yt-dlp/archive/master.zip \
-    pycryptodomex \
-    brotli \
-    mutagen \
-    websockets \
-    certifi \
-    requests \
-    pysocks
-
-# 6. Copy Code
+# Baaki code copy karein
 COPY . .
 
-# 7. Create Robust Start Script (Direct Binaries)
-# Service command kabhi kabhi Docker me fail hoti hai, isliye direct run karenge.
-# Sleep 5 zaroori hai taake Tor connect ho jaye server start hone se pehle.
-RUN echo "#!/bin/bash\n\
-tor &\n\
-privoxy /etc/privoxy/config &\n\
-sleep 5\n\
-uvicorn main:app --host 0.0.0.0 --port 8000" > /app/start.sh && chmod +x /app/start.sh
-
-# 8. Start Everything
-CMD ["/app/start.sh"]
+# Server start karein
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
