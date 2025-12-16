@@ -6,7 +6,6 @@ import yt_dlp
 import os
 import time
 import glob
-import random
 
 app = FastAPI()
 
@@ -22,20 +21,12 @@ class DownloadRequest(BaseModel):
     url: str
     quality: str = "best"
 
-# --- FAKE IPHONE HEADERS ---
-# Ye headers Instagram ko dhoka denge
+# --- FAKE IPHONE HEADERS (Tor ke sath ye best chalta hai) ---
 IPHONE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
     'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'TE': 'trailers'
 }
 
 @app.post("/get-info")
@@ -46,10 +37,12 @@ async def get_info(request: DownloadRequest):
         'quiet': True,
         'nocheckcertificate': True,
         'cookiefile': cookie_file,
-        'http_headers': IPHONE_HEADERS, # <--- IPHONE HEADERS
+        'http_headers': IPHONE_HEADERS,
+        # PROXY ENABLED (Tor Network) 👻
+        'proxy': 'http://127.0.0.1:8118',
         'extractor_args': {
             'instagram': {
-                'max_comments': ['0'] # Comments mat lao, fast chalega
+                'max_comments': ['0']
             }
         }
     }
@@ -71,6 +64,7 @@ async def download_video(request: DownloadRequest):
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
 
+        # Safai
         files = glob.glob('downloads/*')
         for f in files:
             try: os.remove(f)
@@ -103,9 +97,10 @@ async def download_video(request: DownloadRequest):
             'ignoreerrors': False,
             'logtostderr': True,
             'postprocessors': postprocessors,
-            'proxy': 'http://127.0.0.1:8118',
             'cookiefile': cookie_file,
-            'http_headers': IPHONE_HEADERS, # <--- IPHONE HEADERS
+            'http_headers': IPHONE_HEADERS,
+            # PROXY ENABLED (Tor Network) 👻
+            'proxy': 'http://127.0.0.1:8118',
         }
 
         # STEP 2: DOWNLOAD
@@ -114,8 +109,9 @@ async def download_video(request: DownloadRequest):
 
         # STEP 3: FIND FILE
         list_of_files = glob.glob('downloads/*') 
+        
         if not list_of_files:
-             return JSONResponse(content={"status": "error", "message": "Download failed. Instagram Rate Limit."}, status_code=200)
+             return JSONResponse(content={"status": "error", "message": "Download failed. Tor proxy might be slow or blocked."}, status_code=200)
         
         final_file = max(list_of_files, key=os.path.getctime)
         
@@ -128,4 +124,3 @@ async def download_video(request: DownloadRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
