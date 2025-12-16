@@ -1,12 +1,10 @@
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
+import os
+import time
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yt_dlp
-import os
-import time
-import glob
-import random
 
 app = FastAPI()
 
@@ -18,117 +16,89 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class InfoRequest(BaseModel):
+    url: str
+
 class DownloadRequest(BaseModel):
     url: str
-    quality: str = "best"
+    quality: str  # 'high', 'medium', 'low', 'audio'
 
-# --- SMART AGENT ROTATION (Facebook/TikTok Confuse Karne Ke Liye) ---
-# Hum har baar alag bhesh badal kar jayenge
-USER_AGENTS = [
-    # iPhone 13
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
-    # Samsung S21
-    'Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Mobile Safari/537.36',
-    # Windows Chrome
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    # Mac Safari
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15'
-]
-
-def get_random_header():
-    return {'User-Agent': random.choice(USER_AGENTS)}
-
+# 1. Sirf Info lane ke liye API
 @app.post("/get-info")
-async def get_info(request: DownloadRequest):
-    cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
-    
-    ydl_opts = {
-        'quiet': True,
-        'nocheckcertificate': True,
-        'cookiefile': cookie_file,
-        'http_headers': get_random_header(), # Random Identity
-    }
+async def get_info(request: InfoRequest):
+    ydl_opts = {'quiet': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=False)
             return {
                 "status": "success",
-                "title": info.get('title', 'Video'),
-                "thumbnail": info.get('thumbnail', ''),
-                "duration": info.get('duration', 0)
+                "title": info.get('title'),
+                "thumbnail": info.get('thumbnail'),
+                "platform": info.get('extractor_key')
             }
     except Exception as e:
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
+        return {"status": "error", "message": str(e)}
 
+# 2. Asal Download ke liye API
+# Is function ko replace karein
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
-    try:
-        if not os.path.exists('downloads'):
-            os.makedirs('downloads')
+    if not os.path.exists('downloads'):
+        os.makedirs('downloads')
 
-        files = glob.glob('downloads/*')
-        for f in files:
-            try: os.remove(f)
-            except: pass
-
-        timestamp = int(time.time())
-        q = str(request.quality)
-        
-        # --- QUALITY LOGIC ---
+    timestamp = int(time.time())
+    
+    # Quality Settings (Wahi purani wali)
+    if request.quality == 'audio':
+        format_str = 'bestaudio/best'
+        output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
+        postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
+    elif request.quality == 'low':
+        format_str = 'worstvideo[height>=360]+worstaudio/worst[height>=360]'
+        output_path = f"downloads/%(title)s_Low_{timestamp}.%(ext)s"
         postprocessors = []
+    elif request.quality == 'medium':
+        format_str = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
+        output_path = f"downloads/%(title)s_Medium_{timestamp}.%(ext)s"
+        postprocessors = []
+    else: 
         format_str = 'bestvideo+bestaudio/best'
-        output_path = f"downloads/%(title)s_Video_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title)s_High_{timestamp}.%(ext)s"
+        postprocessors = []
 
-        if q == 'audio':
-            format_str = 'bestaudio/best'
-            output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
-            postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
-        elif q in ['360', '480', '720', '1080']:
-            format_str = f'bestvideo[height<={q}]+bestaudio/best[height<={q}]/bestvideo+bestaudio/best'
-            output_path = f"downloads/%(title)s_{q}p_{timestamp}.%(ext)s"
+    # --- UPDATE: RETRY LOGIC ADDED HERE ---
+    ydl_opts = {
+        'outtmpl': output_path,
+        'format': format_str,
+        'quiet': False,
+        'noplaylist': True,
+        'updatetime': False,
+        'postprocessors': postprocessors,
+        'source_address': '0.0.0.0',
         
-        cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
+        # Ye nayi lines hain jo error rokengi:
+        'retries': 10,              # Agar fail ho to 10 baar try karo
+        'fragment_retries': 10,     # Agar video ka tukda fail ho to retry karo
+        'socket_timeout': 30,       # 30 second tak wait karo
+        'ignoreerrors': True        # Choti moti errors ko ignore karo
+    }
 
-        # --- FACEBOOK/TIKTOK SPECIFIC TRICKS ---
-        current_headers = get_random_header()
-        
-        # Facebook specific android fix
-        extractor_args = {}
-        if 'facebook.com' in request.url or 'fb.watch' in request.url:
-             extractor_args = {'facebook': {'player_client': ['android']}}
-
-        ydl_opts = {
-            'outtmpl': output_path,
-            'format': format_str,
-            'merge_output_format': 'mp4',
-            'noplaylist': True,
-            'nocheckcertificate': True,
-            'ignoreerrors': True,
-            'logtostderr': True,
-            'postprocessors': postprocessors,
-            'cookiefile': cookie_file,
-            'http_headers': current_headers,
-            'extractor_args': extractor_args
-        }
-
-        # STEP 2: DOWNLOAD
+    try:
+        print(f"Downloading {request.quality} quality...")
+        filename = ""
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([request.url])
+            info = ydl.extract_info(request.url, download=True)
+            filename = ydl.prepare_filename(info)
+            
+            if request.quality == 'audio':
+                filename = filename.rsplit('.', 1)[0] + '.mp3'
 
-        # STEP 3: FIND FILE
-        list_of_files = glob.glob('downloads/*') 
-        
-        if not list_of_files:
-             return JSONResponse(content={"status": "error", "message": "Download failed. Server IP Blocked by Platform."}, status_code=200)
-        
-        final_file = max(list_of_files, key=os.path.getctime)
-        
-        return FileResponse(path=final_file, filename=os.path.basename(final_file), media_type='application/octet-stream')
+        # Check karein ke file bani bhi hai ya nahi (Retry ke baad)
+        if not filename or not os.path.exists(filename):
+             return {"status": "error", "message": "Download failed after retries. Internet unstable?"}
+
+        return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
 
     except Exception as e:
         print(f"Error: {str(e)}")
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=200)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        return {"status": "error", "message": str(e)}
