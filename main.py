@@ -51,19 +51,19 @@ async def download_video(request: DownloadRequest):
     # Quality Settings (Wahi purani wali)
     if request.quality == 'audio':
         format_str = 'bestaudio/best'
-        output_path = f"downloads/%(title)s_Audio_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title).50s_Audio_{timestamp}.%(ext)s"
         postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
     elif request.quality == 'low':
         format_str = 'worstvideo[height>=360]+worstaudio/worst[height>=360]'
-        output_path = f"downloads/%(title)s_Low_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title).50s_Low_{timestamp}.%(ext)s"
         postprocessors = []
     elif request.quality == 'medium':
         format_str = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-        output_path = f"downloads/%(title)s_Medium_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title).50s_Medium_{timestamp}.%(ext)s"
         postprocessors = []
     else: 
         format_str = 'bestvideo+bestaudio/best'
-        output_path = f"downloads/%(title)s_High_{timestamp}.%(ext)s"
+        output_path = f"downloads/%(title).50s_High_{timestamp}.%(ext)s"
         postprocessors = []
 
     # --- UPDATE: RETRY LOGIC ADDED HERE ---
@@ -102,3 +102,4 @@ async def download_video(request: DownloadRequest):
     except Exception as e:
         print(f"Error: {str(e)}")
         return {"status": "error", "message": str(e)}
+
