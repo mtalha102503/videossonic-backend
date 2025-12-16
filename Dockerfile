@@ -1,13 +1,14 @@
 FROM python:3.11-slim
 
-# 1. System Tools (FFmpeg + Git zaroori hain)
+# 1. System Tools (FFmpeg + Git + Curl + AtomicParsley)
+# Added curl and atomicparsley for better download handling and metadata
 RUN apt-get update && \
-    apt-get install -y ffmpeg git && \
+    apt-get install -y ffmpeg git curl atomicparsley && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 2. Pip Upgrade (Zaroori hai taake error na aaye)
+# 2. Pip Upgrade
 RUN pip install --no-cache-dir --upgrade pip
 
 # 3. Basic Requirements Install
@@ -15,13 +16,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 4. FINAL SOLUTION: Install yt-dlp + Helper Libraries
-# Added 'mutagen' and 'websockets' for better stream handling
+# Added 'mutagen', 'websockets' and 'certifi' for secure connections
 RUN pip install --no-cache-dir --force-reinstall \
     https://github.com/yt-dlp/yt-dlp/archive/master.zip \
     pycryptodomex \
     brotli \
     mutagen \
-    websockets
+    websockets \
+    certifi \
+    requests
 
 # 5. Copy Code
 COPY . .
