@@ -103,6 +103,7 @@ async def download_video(request: DownloadRequest):
             'ignoreerrors': False,
             'logtostderr': True,
             'postprocessors': postprocessors,
+            'proxy': 'http://127.0.0.1:8118',
             'cookiefile': cookie_file,
             'http_headers': IPHONE_HEADERS, # <--- IPHONE HEADERS
         }
@@ -127,3 +128,4 @@ async def download_video(request: DownloadRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
