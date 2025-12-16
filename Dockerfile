@@ -36,11 +36,13 @@ RUN pip install --no-cache-dir --force-reinstall \
 # 6. Copy Code
 COPY . .
 
-# 7. Create Startup Script (Tor, Privoxy, aur App ek sath chalane ke liye)
-# Ye script pehle Tor aur Privoxy start karega, phir app chalayega
+# 7. Create Robust Start Script (Direct Binaries)
+# Service command kabhi kabhi Docker me fail hoti hai, isliye direct run karenge.
+# Sleep 5 zaroori hai taake Tor connect ho jaye server start hone se pehle.
 RUN echo "#!/bin/bash\n\
-service tor start\n\
-service privoxy start\n\
+tor &\n\
+privoxy /etc/privoxy/config &\n\
+sleep 5\n\
 uvicorn main:app --host 0.0.0.0 --port 8000" > /app/start.sh && chmod +x /app/start.sh
 
 # 8. Start Everything
