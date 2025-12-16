@@ -22,16 +22,11 @@ class DownloadRequest(BaseModel):
     url: str
     quality: str = "best"
 
-# --- SMART AGENT ROTATION (Facebook/TikTok Confuse Karne Ke Liye) ---
-# Hum har baar alag bhesh badal kar jayenge
+# --- SMART AGENT ROTATION ---
 USER_AGENTS = [
-    # iPhone 13
     'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
-    # Samsung S21
     'Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Mobile Safari/537.36',
-    # Windows Chrome
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    # Mac Safari
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15'
 ]
 
@@ -46,7 +41,7 @@ async def get_info(request: DownloadRequest):
         'quiet': True,
         'nocheckcertificate': True,
         'cookiefile': cookie_file,
-        'http_headers': get_random_header(), # Random Identity
+        'http_headers': get_random_header(),
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -66,6 +61,7 @@ async def download_video(request: DownloadRequest):
         if not os.path.exists('downloads'):
             os.makedirs('downloads')
 
+        # Safai
         files = glob.glob('downloads/*')
         for f in files:
             try: os.remove(f)
@@ -89,39 +85,59 @@ async def download_video(request: DownloadRequest):
         
         cookie_file = 'cookies.txt' if os.path.exists('cookies.txt') else None
 
-        # --- FACEBOOK/TIKTOK SPECIFIC TRICKS ---
-        current_headers = get_random_header()
-        
-        # Facebook specific android fix
-        extractor_args = {}
-        if 'facebook.com' in request.url or 'fb.watch' in request.url:
-             extractor_args = {'facebook': {'player_client': ['android']}}
+        # --- AUTO-RETRY SYSTEM (User ko error nahi dikhega) ---
+        max_retries = 3
+        final_file = None
+        last_error = ""
 
-        ydl_opts = {
-            'outtmpl': output_path,
-            'format': format_str,
-            'merge_output_format': 'mp4',
-            'noplaylist': True,
-            'nocheckcertificate': True,
-            'ignoreerrors': True,
-            'logtostderr': True,
-            'postprocessors': postprocessors,
-            'cookiefile': cookie_file,
-            'http_headers': current_headers,
-            'extractor_args': extractor_args
-        }
+        for attempt in range(max_retries):
+            try:
+                print(f"Attempt {attempt + 1} of {max_retries}...")
+                
+                # Har baar naya bhesh (New Headers)
+                current_headers = get_random_header()
+                
+                extractor_args = {}
+                if 'facebook.com' in request.url or 'fb.watch' in request.url:
+                     extractor_args = {'facebook': {'player_client': ['android']}}
 
-        # STEP 2: DOWNLOAD
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([request.url])
+                ydl_opts = {
+                    'outtmpl': output_path,
+                    'format': format_str,
+                    'merge_output_format': 'mp4',
+                    'noplaylist': True,
+                    'nocheckcertificate': True,
+                    'ignoreerrors': True,
+                    'logtostderr': True,
+                    'postprocessors': postprocessors,
+                    'cookiefile': cookie_file,
+                    'http_headers': current_headers,
+                    'extractor_args': extractor_args
+                }
 
-        # STEP 3: FIND FILE
-        list_of_files = glob.glob('downloads/*') 
-        
-        if not list_of_files:
-             return JSONResponse(content={"status": "error", "message": "Download failed. Server IP Blocked by Platform."}, status_code=200)
-        
-        final_file = max(list_of_files, key=os.path.getctime)
+                # Download Try Karein
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([request.url])
+
+                # Check karein file aayi ya nahi
+                list_of_files = glob.glob('downloads/*') 
+                if list_of_files:
+                    # File mil gayi! Loop todo aur user ko bhejo
+                    final_file = max(list_of_files, key=os.path.getctime)
+                    if os.path.getsize(final_file) > 1000: # Verify size
+                        break 
+                
+                # Agar file nahi mili, to thoda saans lo aur dobara try karo
+                time.sleep(1)
+
+            except Exception as e:
+                print(f"Retry failed: {str(e)}")
+                last_error = str(e)
+                time.sleep(1)
+
+        # Agar 3 koshishon ke baad bhi kuch na mile
+        if not final_file or not os.path.exists(final_file):
+             return JSONResponse(content={"status": "error", "message": "Download failed after multiple attempts. Server Blocked."}, status_code=200)
         
         return FileResponse(path=final_file, filename=os.path.basename(final_file), media_type='application/octet-stream')
 
