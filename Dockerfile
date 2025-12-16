@@ -14,9 +14,14 @@ RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. FINAL SOLUTION: Install yt-dlp + Helper Libraries (Brotli & PyCryptodomex)
-# Ye libraries Facebook/TikTok ki encryption todne mein madad karti hain.
-RUN pip install --no-cache-dir --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip pycryptodomex brotli
+# 4. FINAL SOLUTION: Install yt-dlp + Helper Libraries
+# Added 'mutagen' and 'websockets' for better stream handling
+RUN pip install --no-cache-dir --force-reinstall \
+    https://github.com/yt-dlp/yt-dlp/archive/master.zip \
+    pycryptodomex \
+    brotli \
+    mutagen \
+    websockets
 
 # 5. Copy Code
 COPY . .
