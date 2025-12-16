@@ -1,22 +1,26 @@
 FROM python:3.9-slim
 
-# 1. System Tools (FFmpeg + Git zaroori hai)
-# Git is required for pip to install from GitHub directly
+# 1. System Tools (FFmpeg + Curl + Unzip zaroori hain)
 RUN apt-get update && \
-    apt-get install -y ffmpeg git && \
+    apt-get install -y ffmpeg curl unzip && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 2. Basic Requirements Install karein
+# 2. Basic Requirements Install karein (yt-dlp ke ilawa)
 COPY requirements.txt .
-# Upgrade pip first to avoid errors
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. MAGIC STEP: Install Latest yt-dlp using Git
-# This pulls the absolute latest code to fix Facebook/TikTok errors
-RUN pip install --no-cache-dir --force-reinstall git+https://github.com/yt-dlp/yt-dlp.git@master
+# 3. ROBUST INSTALL: Download & Install yt-dlp from Zip (No Git needed)
+# Pehle zip download karo
+RUN curl -L -o yt-dlp.zip https://github.com/yt-dlp/yt-dlp/archive/master.zip
+# Phir unzip karo
+RUN unzip yt-dlp.zip
+# Folder ka naam 'yt-dlp-master' hota hai, wahan se install karo
+RUN pip install --no-cache-dir ./yt-dlp-master
+# Safai (Zip aur folder delete karo)
+RUN rm -rf yt-dlp.zip yt-dlp-master
 
 # 4. Baaki Code Copy
 COPY . .
