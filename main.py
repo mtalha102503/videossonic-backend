@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import subprocess
 import yt_dlp
+import urllib.parse
 
 app = FastAPI()
 
@@ -19,12 +22,7 @@ class RequestModel(BaseModel):
 
 @app.post("/get-info")
 async def get_info(request: RequestModel):
-    # Sirf info laane ke liye settings
-    ydl_opts = {
-        'quiet': True,
-        'nocheckcertificate': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    }
+    ydl_opts = {'quiet': True, 'nocheckcertificate': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=False)
@@ -37,40 +35,71 @@ async def get_info(request: RequestModel):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# --- 🔥 MAIN MAGIC: GET DIRECT LINK (NO SERVER DOWNLOAD) 🔥 ---
+# --- 🔥 THE HYBRID DOWNLOADER (SMART LOGIC) 🔥 ---
 @app.post("/download-video")
-async def get_direct_link(request: RequestModel):
+async def download_video(request: RequestModel):
     
-    # Quality select karne ki logic
-    format_selection = 'best'
-    if request.quality == 'audio':
-        format_selection = 'bestaudio/best'
-    elif request.quality == '1080':
-        format_selection = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
+    # 1. URL Check: Kya ye Amazon hai?
+    is_amazon = "amazon" in request.url or "amzn" in request.url
     
-    ydl_opts = {
-        'format': format_selection,
-        'quiet': True,
-        'nocheckcertificate': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    }
-
+    # 2. Title Clean Karo (Common Step)
+    video_title = "VideosSonic_Video"
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # 1. Info extract karo
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
             info = ydl.extract_info(request.url, download=False)
-            
-            # 2. Asli Direct URL nikalo (Amazon/TikTok server ka link)
-            direct_url = info.get('url')
-            
-            # Title bhi bhej do taaki filename sahi ban sake
-            title = info.get('title', 'video').replace('"', '').replace("'", "")
-            
-            return {
-                "status": "success",
-                "direct_url": direct_url,
-                "filename": f"{title}.mp4"
-            }
+            video_title = info.get('title', 'video').replace('"', '').replace("'", "").replace(" ", "_")
+            direct_url = info.get('url') # Direct link for non-amazon
+    except:
+        pass
 
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    filename = f"{video_title[:50]}.mp4"
+    if request.quality == 'audio':
+        filename = f"{video_title[:50]}.mp3"
+    
+    encoded_filename = urllib.parse.quote(filename)
+
+    # === CASE A: AGAR TIKTOK, INSTA, FB HAI (Direct Link Bhejo) ===
+    if not is_amazon:
+        # Hum JSON bhejenge taaki browser khud download kare (Fastest Speed)
+        return JSONResponse(content={
+            "status": "direct_link",
+            "direct_url": direct_url,
+            "filename": filename
+        })
+
+    # === CASE B: AGAR AMAZON HAI (Pipeline Use Karo) ===
+    # Kyunki Amazon direct link browser mein play ho jata hai, download nahi hota.
+    else:
+        cmd = [
+            "yt-dlp",
+            "--output", "-",
+            "--quiet", "--no-warnings", "--nocheck-certificate",
+            request.url
+        ]
+
+        if request.quality == 'audio':
+            cmd.extend(["--extract-audio", "--audio-format", "mp3"])
+        elif request.quality == '1080':
+            cmd.extend(["--format", "bestvideo[height<=1080]+bestaudio/best"])
+        else:
+            cmd.extend(["--format", "best"])
+
+        # Stream Process Start
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
+
+        def iterfile():
+            try:
+                while True:
+                    chunk = proc.stdout.read(64 * 1024)
+                    if not chunk: break
+                    yield chunk
+            finally:
+                proc.kill()
+
+        headers = {
+            'Content-Disposition': f'attachment; filename="{encoded_filename}"',
+            'Content-Type': 'video/mp4' if request.quality != 'audio' else 'audio/mpeg'
+        }
+        
+        # Ye response 'File' ki tarah behave karega
+        return StreamingResponse(iterfile(), headers=headers)
