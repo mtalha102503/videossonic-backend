@@ -1,10 +1,11 @@
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import subprocess
 import yt_dlp
-import urllib.parse
+import os
+import uuid
+import time
 
 app = FastAPI()
 
@@ -20,13 +21,18 @@ class RequestModel(BaseModel):
     url: str
     quality: str = "1080"
 
+# --- CLEANUP FUNCTION (File bhejne ke baad delete karega) ---
+def cleanup_file(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"Deleted temp file: {path}")
+    except Exception as e:
+        print(f"Error deleting file: {e}")
+
 @app.post("/get-info")
 async def get_info(request: RequestModel):
-    ydl_opts = {
-        'quiet': True,
-        'nocheckcertificate': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    }
+    ydl_opts = {'quiet': True, 'nocheckcertificate': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=False)
@@ -39,68 +45,65 @@ async def get_info(request: RequestModel):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# --- 🔥 UNIVERSAL PIPELINE (NO CORRUPTION) 🔥 ---
+# --- 🔥 THE STABLE DOWNLOADER (TEMP FILE METHOD) 🔥 ---
 @app.post("/download-video")
-async def download_video(request: RequestModel):
+async def download_video(request: RequestModel, background_tasks: BackgroundTasks):
     
-    # 1. Clean Title Fetch Karo
-    video_title = "VideosSonic_Video"
-    try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'nocheckcertificate': True}) as ydl:
-            info = ydl.extract_info(request.url, download=False)
-            # Title safai
-            video_title = info.get('title', 'video').replace('"', '').replace("'", "").replace(" ", "_")
-            # Limit filename length
-            video_title = video_title[:50]
-    except:
-        pass
-
-    # 2. Filename Encoding
-    ext = "mp3" if request.quality == 'audio' else "mp4"
-    encoded_filename = urllib.parse.quote(f"{video_title}.{ext}")
-
-    # 3. yt-dlp Command Construction
-    # Hum '-o -' use karenge taaki disk par save na ho, seedha pipe ho.
-    cmd = [
-        "yt-dlp",
-        "--output", "-",  # Pipe to Stdout
-        "--quiet", "--no-warnings", "--nocheck-certificate",
-        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        request.url
-    ]
-
-    # Quality Logic
+    # 1. Unique Filename banao (Taaki mix na ho)
+    file_id = str(uuid.uuid4())
+    filename = f"video_{file_id}.mp4"
     if request.quality == 'audio':
-        cmd.extend(["--extract-audio", "--audio-format", "mp3"])
-    elif request.quality == '1080':
-        cmd.extend(["--format", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"])
-    else:
-        # Default Best
-        cmd.extend(["--format", "best"])
-
-    # 4. Process Start (Stream)
-    # bufsize badha diya hai taaki stream smooth ho
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
-
-    # 5. Generator Function
-    def iterfile():
-        try:
-            while True:
-                # 64KB chunks read karo
-                chunk = proc.stdout.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        except Exception as e:
-            print(f"Stream Error: {e}")
-            proc.kill()
-        finally:
-            proc.kill()
-
-    # 6. Set Headers
-    headers = {
-        'Content-Disposition': f'attachment; filename="{encoded_filename}"',
-        'Content-Type': 'audio/mpeg' if request.quality == 'audio' else 'video/mp4'
+        filename = f"audio_{file_id}.mp3"
+    
+    # 2. Options Setup
+    ydl_opts = {
+        'outtmpl': filename, # Temp name
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        # Agar Amazon/TikTok HLS hai to ye usse MP4 bana dega
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        'overwrites': True,
     }
 
-    return StreamingResponse(iterfile(), headers=headers)
+    if request.quality == 'audio':
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+        }]
+
+    try:
+        # 3. Server par Download Start
+        print(f"Downloading to server: {filename}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([request.url])
+
+        # 4. Audio fix (yt-dlp kabhi kabhi .mp3 add kar deta hai extension mein)
+        final_path = filename
+        if request.quality == 'audio' and not os.path.exists(final_path):
+            if os.path.exists(filename + ".mp3"):
+                final_path = filename + ".mp3"
+
+        # 5. --- CRITICAL CHECK: File Size ---
+        if not os.path.exists(final_path) or os.path.getsize(final_path) == 0:
+            raise Exception("Download failed (0 bytes). Server Blocked or FFMPEG missing.")
+
+        # 6. User ko Bhejo aur baad mein Delete karo
+        # Browser ko asli naam batane ke liye
+        download_name = f"VideosSonic_{int(time.time())}.{'mp3' if request.quality == 'audio' else 'mp4'}"
+        
+        background_tasks.add_task(cleanup_file, final_path)
+        
+        return FileResponse(
+            path=final_path, 
+            filename=download_name, 
+            media_type='application/octet-stream'
+        )
+
+    except Exception as e:
+        # Agar error aaye to bhi safai karo
+        if os.path.exists(filename):
+            os.remove(filename)
+        print(f"Error: {e}")
+        return {"status": "error", "message": f"Server processing failed: {str(e)}"}
