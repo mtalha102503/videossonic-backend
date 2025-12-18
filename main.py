@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import subprocess
 import yt_dlp
 import urllib.parse
@@ -16,49 +15,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class RequestModel(BaseModel):
-    url: str
-
-# 1. INFO API (Metadata ke liye)
-@app.post("/get-info")
-async def get_info(request: RequestModel):
-    ydl_opts = {'quiet': True, 'nocheckcertificate': True}
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(request.url, download=False)
-            return {
-                "status": "success",
-                "title": info.get('title', 'Video'),
-                "thumbnail": info.get('thumbnail'),
-                "platform": info.get('extractor_key')
-            }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-# --- 🔥 MASTER DOWNLOAD ENDPOINT (GET METHOD) 🔥 ---
-# Frontend bas is link ko new tab mein kholega
+# --- ZAROORI: YE WALA CODE HONA CHAHIYE ---
 @app.get("/download")
 async def download_video(url: str = Query(...), quality: str = Query("1080")):
     
-    # 1. Pehle URL analyze karo
+    # 1. URL Check
     url_lower = url.lower()
     
-    # FAST LANE: TikTok & Facebook (Redirect Mode)
-    # Inke liye hum server use nahi karenge, seedha user ko bhej denge source par
+    # === TIKTOK & FACEBOOK (FAST REDIRECT) ===
     if "tiktok" in url_lower or "facebook" in url_lower or "fb.watch" in url_lower:
         try:
             with yt_dlp.YoutubeDL({'quiet': True, 'nocheckcertificate': True}) as ydl:
                 info = ydl.extract_info(url, download=False)
-                # Browser ko bolo: "Jao yahan se download karlo" (307 Redirect)
+                # Ye browser ko bhejega asli link par
                 return RedirectResponse(url=info.get('url'))
         except:
-            pass # Agar fail hua to neeche Stream method par gir jayega
+            pass 
 
-    # SECURE LANE: Amazon & Instagram (Proxy Stream Mode)
-    # Ye complex sites hain, inhein hum server ke through guzarenge
-    
-    # Title Fetch
-    video_title = "VideosSonic_Download"
+    # === AMAZON & INSTAGRAM (STREAMING) ===
+    video_title = "VideosSonic_Video"
     try:
         with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -70,22 +45,17 @@ async def download_video(url: str = Query(...), quality: str = Query("1080")):
     if quality == 'audio':
         encoded_filename = urllib.parse.quote(f"{video_title[:50]}.mp3")
 
-    # Command Construction
+    # Command
     cmd = [
-        "yt-dlp",
-        "--output", "-",  # Pipe Output
-        "--quiet", "--no-warnings", 
-        "--nocheck-certificate",
-        url
+        "yt-dlp", "--output", "-", "--quiet", "--no-warnings", 
+        "--nocheck-certificate", url
     ]
 
     if quality == 'audio':
         cmd.extend(["--extract-audio", "--audio-format", "mp3"])
     else:
-        # Amazon HLS fix + High Quality Merge
         cmd.extend(["--format", "bestvideo+bestaudio/best", "--merge-output-format", "mp4"])
 
-    # Stream Start
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
 
     def iterfile():
@@ -103,3 +73,15 @@ async def download_video(url: str = Query(...), quality: str = Query("1080")):
     }
 
     return StreamingResponse(iterfile(), headers=headers)
+
+# Info Route (Ye bhi zaroori hai)
+@app.post("/get-info")
+async def get_info(data: dict):
+    url = data.get("url")
+    with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        info = ydl.extract_info(url, download=False)
+        return {
+            "status": "success",
+            "title": info.get('title'),
+            "thumbnail": info.get('thumbnail')
+        }
