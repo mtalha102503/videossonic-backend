@@ -1,10 +1,10 @@
-from fastapi.responses import FileResponse
-import os
-import time
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yt_dlp
+import requests
+import urllib.parse
 
 app = FastAPI()
 
@@ -21,85 +21,99 @@ class InfoRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     url: str
-    quality: str  # 'high', 'medium', 'low', 'audio'
+    quality: str  # '1080', '720', '360', 'audio'
 
-# 1. Sirf Info lane ke liye API
+# 1. Sirf Info lane ke liye API (Ye waisa hi rahega)
 @app.post("/get-info")
 async def get_info(request: InfoRequest):
-    ydl_opts = {'quiet': True}
+    ydl_opts = {
+        'quiet': True,
+        'nocheckcertificate': True,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(request.url, download=False)
             return {
                 "status": "success",
-                "title": info.get('title'),
+                "title": info.get('title', 'Video'),
                 "thumbnail": info.get('thumbnail'),
                 "platform": info.get('extractor_key')
             }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# 2. Asal Download ke liye API
-# Is function ko replace karein
+# 2. FAST STREAMING DOWNLOAD API (Magic Here ⚡)
 @app.post("/download-video")
 async def download_video(request: DownloadRequest):
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
-
-    timestamp = int(time.time())
+    # Quality Mapping
+    format_str = 'best' # Default
     
-    # Quality Settings (Wahi purani wali)
     if request.quality == 'audio':
         format_str = 'bestaudio/best'
-        output_path = f"downloads/%(title).50s_Audio_{timestamp}.%(ext)s"
-        postprocessors = [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3',}]
-    elif request.quality == 'low':
-        format_str = 'worstvideo[height>=360]+worstaudio/worst[height>=360]'
-        output_path = f"downloads/%(title).50s_Low_{timestamp}.%(ext)s"
-        postprocessors = []
-    elif request.quality == 'medium':
-        format_str = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-        output_path = f"downloads/%(title).50s_Medium_{timestamp}.%(ext)s"
-        postprocessors = []
-    else: 
-        format_str = 'bestvideo+bestaudio/best'
-        output_path = f"downloads/%(title).50s_High_{timestamp}.%(ext)s"
-        postprocessors = []
+    elif request.quality == '1080':
+        format_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best'
+    elif request.quality == '720':
+        format_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best'
+    elif request.quality == '480':
+        format_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best'
+    elif request.quality == '360':
+        format_str = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
 
-    # --- UPDATE: RETRY LOGIC ADDED HERE ---
     ydl_opts = {
-        'outtmpl': output_path,
         'format': format_str,
-        'quiet': False,
-        'noplaylist': True,
-        'updatetime': False,
-        'postprocessors': postprocessors,
-        'source_address': '0.0.0.0',
-        
-        # Ye nayi lines hain jo error rokengi:
-        'retries': 10,              # Agar fail ho to 10 baar try karo
-        'fragment_retries': 10,     # Agar video ka tukda fail ho to retry karo
-        'socket_timeout': 30,       # 30 second tak wait karo
-        'ignoreerrors': True        # Choti moti errors ko ignore karo
+        'quiet': True,
+        'nocheckcertificate': True,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     }
 
     try:
-        print(f"Downloading {request.quality} quality...")
-        filename = ""
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(request.url, download=True)
-            filename = ydl.prepare_filename(info)
+            # 1. Video Info nikalo (Download nahi karna)
+            info = ydl.extract_info(request.url, download=False)
             
+            # 2. Direct URL pakdo
+            direct_url = info.get('url')
+            
+            # Filename Clean karo
+            title = info.get('title', 'video').replace('"', '').replace("'", "")
+            encoded_filename = urllib.parse.quote(f"{title}.mp4") # Safe filename
+            
+            # Agar audio maanga hai to extension change
             if request.quality == 'audio':
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
+                encoded_filename = urllib.parse.quote(f"{title}.mp3")
 
-        # Check karein ke file bani bhi hai ya nahi (Retry ke baad)
-        if not filename or not os.path.exists(filename):
-             return {"status": "error", "message": "Download failed after retries. Internet unstable?"}
+            # 3. Connection banao (Server to TikTok/Amazon)
+            # stream=True bohot zaroori hai
+            external_req = requests.get(direct_url, stream=True, headers=info.get('http_headers'))
 
-        return FileResponse(path=filename, filename=os.path.basename(filename), media_type='application/octet-stream')
+            # 4. Generator Function (Chunk by Chunk data bhejega)
+            def iterfile():
+                try:
+                    for chunk in external_req.iter_content(chunk_size=1024 * 1024): # 1MB Chunks
+                        if chunk:
+                            yield chunk
+                except Exception as e:
+                    print(f"Stream Error: {e}")
+
+            # 5. Headers set karo taaki browser ko lage file aa rahi hai
+            headers = {
+                'Content-Disposition': f'attachment; filename="{encoded_filename}"',
+                'Content-Type': external_req.headers.get('content-type', 'video/mp4')
+            }
+            
+            # Agar file size pata hai to bhej do (Progress bar ke liye)
+            if 'content-length' in external_req.headers:
+                headers['Content-Length'] = external_req.headers['content-length']
+
+            # 6. Response Bhejo (Direct Stream)
+            return StreamingResponse(
+                iterfile(),
+                headers=headers,
+                media_type=external_req.headers.get('content-type', 'video/mp4')
+            )
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Server Error: {str(e)}")
+        # Agar error aaye to JSON return karo (Frontend handle karega)
         return {"status": "error", "message": str(e)}
-
