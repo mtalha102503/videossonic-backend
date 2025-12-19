@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import yt_dlp
-import requests
+import aiohttp # Ye nayi library hai
+import urllib.parse
 
 app = FastAPI()
 
@@ -14,10 +15,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- HELPER FUNCTION TO GET DIRECT URL ---
+# --- HELPER: GET DIRECT URL ---
 def get_direct_url(video_url, quality):
-    # 'best' format wo hota hai jisme Audio+Video dono hon (usually 720p/360p)
-    # Agar alag alag streams uthayenge to merge krna padega jo slow hai.
+    # Format selection: Best file with Audio+Video combined
     format_selection = 'best[ext=mp4]/best'
     
     if quality == 'low':
@@ -29,13 +29,14 @@ def get_direct_url(video_url, quality):
         'quiet': True,
         'format': format_selection,
         'noplaylist': True,
+        'geo_bypass': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(video_url, download=False)
         return info.get('url'), info.get('title'), info.get('ext')
 
-# 1. Info API (Ye wahi purani wali hai)
+# 1. INFO API
 @app.post("/get-info")
 async def get_info(request: dict):
     url = request.get("url")
@@ -52,43 +53,43 @@ async def get_info(request: dict):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# 2. STREAM DOWNLOAD API (GET Request for Browser)
-# Note: Hum POST ki jagah GET use karenge taake browser direct download handle kare
+# 2. STREAM DOWNLOAD API (FIXED WITH AIOHTTP)
 @app.get("/stream-video")
 async def stream_video(url: str, quality: str = "medium"):
     try:
-        # 1. Direct YouTube/Server URL nikalo
+        # 1. URL Nikalo
         direct_url, title, ext = get_direct_url(url, quality)
         
         if not direct_url:
             raise HTTPException(status_code=404, detail="Could not extract video URL")
 
-        # 2. External Server se connection banao (Stream=True)
-        # Ye Render server ko bridge banata hai
-        external_req = requests.get(direct_url, stream=True)
-
-        # 3. Generator function jo data tukdo me bhejega
-        def iterfile():
-            try:
-                for chunk in external_req.iter_content(chunk_size=1024 * 1024): # 1MB Chunks
-                    if chunk:
+        # 2. Async Client Session start karo
+        # Ye 'async' hai, to server block nahi hoga
+        async def iterfile():
+            async with aiohttp.ClientSession() as session:
+                async with session.get(direct_url) as resp:
+                    # Video data ko chote tukdo (chunks) me user ko bhejo
+                    async for chunk in resp.content.iter_chunked(1024 * 1024): # 1MB chunks
                         yield chunk
-            except Exception as e:
-                print(f"Stream Error: {e}")
 
-        # 4. Headers set karo taake browser ko lage ye file download ho rahi hai
+        # 3. Filename set karo
         clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
         filename = f"{clean_title}.{ext}"
         
+        # NOTE: Content-Disposition attachment browser ko force karta hai download ke liye
         headers = {
             'Content-Disposition': f'attachment; filename="{filename}"'
         }
 
+        # 4. Return StreamingResponse
+        # Hum headers me 'media_type' nahi de rahe taki browser khud detect kare
+        # ya generic octet-stream use kare taake play hone ki bajaye download ho.
         return StreamingResponse(
             iterfile(),
-            media_type=external_req.headers.get("content-type"),
+            media_type="application/octet-stream", 
             headers=headers
         )
 
     except Exception as e:
+        # Agar start me hi error aaye to JSON return karo
         return {"status": "error", "message": str(e)}
