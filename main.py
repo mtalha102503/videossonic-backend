@@ -1,10 +1,8 @@
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import subprocess
+from fastapi.responses import StreamingResponse
 import yt_dlp
-import urllib.parse
+import requests
 
 app = FastAPI()
 
@@ -16,74 +14,81 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class RequestModel(BaseModel):
-    url: str
-    quality: str = "1080"
+# --- HELPER FUNCTION TO GET DIRECT URL ---
+def get_direct_url(video_url, quality):
+    # 'best' format wo hota hai jisme Audio+Video dono hon (usually 720p/360p)
+    # Agar alag alag streams uthayenge to merge krna padega jo slow hai.
+    format_selection = 'best[ext=mp4]/best'
+    
+    if quality == 'low':
+        format_selection = 'worst[ext=mp4]/worst'
+    elif quality == 'audio':
+        format_selection = 'bestaudio/best'
 
-# Info Route
+    ydl_opts = {
+        'quiet': True,
+        'format': format_selection,
+        'noplaylist': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(video_url, download=False)
+        return info.get('url'), info.get('title'), info.get('ext')
+
+# 1. Info API (Ye wahi purani wali hai)
 @app.post("/get-info")
-async def get_info(request: RequestModel):
-    ydl_opts = {'quiet': True, 'nocheckcertificate': True}
+async def get_info(request: dict):
+    url = request.get("url")
+    ydl_opts = {'quiet': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(request.url, download=False)
+            info = ydl.extract_info(url, download=False)
             return {
                 "status": "success",
-                "title": info.get('title', 'Video'),
+                "title": info.get('title'),
                 "thumbnail": info.get('thumbnail'),
                 "platform": info.get('extractor_key')
             }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# --- 🔥 FINAL ENDPOINT (POST) 🔥 ---
-# Ye 'GET' nahi 'POST' hai. 404 nahi aayega kyunki get-info bhi POST hai aur wo chal rha hai.
-@app.post("/download-video")
-async def download_video(request: RequestModel):
-    
-    # 1. Clean Title
-    video_title = "VideosSonic_Video"
+# 2. STREAM DOWNLOAD API (GET Request for Browser)
+# Note: Hum POST ki jagah GET use karenge taake browser direct download handle kare
+@app.get("/stream-video")
+async def stream_video(url: str, quality: str = "medium"):
     try:
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-            info = ydl.extract_info(request.url, download=False)
-            video_title = info.get('title', 'video').replace('"', '').replace("'", "").replace(" ", "_")
-    except:
-        pass
+        # 1. Direct YouTube/Server URL nikalo
+        direct_url, title, ext = get_direct_url(url, quality)
+        
+        if not direct_url:
+            raise HTTPException(status_code=404, detail="Could not extract video URL")
 
-    ext = "mp3" if request.quality == 'audio' else "mp4"
-    encoded_filename = urllib.parse.quote(f"{video_title[:50]}.{ext}")
+        # 2. External Server se connection banao (Stream=True)
+        # Ye Render server ko bridge banata hai
+        external_req = requests.get(direct_url, stream=True)
 
-    # 2. Universal Stream Command (No Redirects)
-    # TikTok/FB/Insta sab yahan se guzrenge
-    cmd = [
-        "yt-dlp",
-        "--output", "-", 
-        "--quiet", "--no-warnings", "--nocheck-certificate",
-        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        request.url
-    ]
+        # 3. Generator function jo data tukdo me bhejega
+        def iterfile():
+            try:
+                for chunk in external_req.iter_content(chunk_size=1024 * 1024): # 1MB Chunks
+                    if chunk:
+                        yield chunk
+            except Exception as e:
+                print(f"Stream Error: {e}")
 
-    if request.quality == 'audio':
-        cmd.extend(["--extract-audio", "--audio-format", "mp3"])
-    else:
-        # Force MP4 merge
-        cmd.extend(["--format", "bestvideo+bestaudio/best", "--merge-output-format", "mp4"])
+        # 4. Headers set karo taake browser ko lage ye file download ho rahi hai
+        clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
+        filename = f"{clean_title}.{ext}"
+        
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"'
+        }
 
-    # 3. Process Start
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
+        return StreamingResponse(
+            iterfile(),
+            media_type=external_req.headers.get("content-type"),
+            headers=headers
+        )
 
-    def iterfile():
-        try:
-            while True:
-                chunk = proc.stdout.read(64 * 1024)
-                if not chunk: break
-                yield chunk
-        finally:
-            proc.kill()
-
-    headers = {
-        'Content-Disposition': f'attachment; filename="{encoded_filename}"',
-        'Content-Type': 'audio/mpeg' if request.quality == 'audio' else 'video/mp4'
-    }
-
-    return StreamingResponse(iterfile(), headers=headers)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
