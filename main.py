@@ -2,21 +2,17 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import os
+import yt_dlp  # Apna Engine Import kia
 
 app = Flask(__name__)
 CORS(app)
 
-def cobalt_download(url):
-    # Updated List of Working Cobalt Instances (Dec 2025)
-    # Hum 'Shotgun Method' use kar rahe hain - jo chal gaya wo best!
+# --- 1. EXTERNAL API METHOD (Pehle ye try karega) ---
+def try_cobalt_api(url):
+    # Sirf 1-2 reliable servers rakhe hain
     servers = [
-        "https://cobalt.jas.bio/api/json",         # Server 1
-        "https://cobalt.zip/api/json",             # Server 2
-        "https://wuk.sh/api/json",                 # Server 3 (Classic)
-        "https://cobalt.kwiatekmiki.pl/api/json",  # Server 4 (Fixed URL)
-        "https://api.cobalt.kwiatekmiki.pl/api/json", # Server 5 (Alt URL)
-        "https://cobalt.154.53.53.53.nip.io/api/json", # Server 6 (IP Based - often reliable)
-        "https://cobalt.nao.20041124.xyz/api/json" # Server 7
+        "https://api.cobalt.tools/api/json",  # Official (Sometimes busy)
+        "https://api.wuk.sh/api/json"         # Popular Alternative
     ]
     
     headers = {
@@ -30,37 +26,50 @@ def cobalt_download(url):
         "filenamePattern": "basic"
     }
 
-    # Loop through all servers
     for api_url in servers:
         try:
-            print(f"Trying server: {api_url}") 
-            # Timeout kam rakha hai taki jaldi agla server try kare
-            response = requests.post(api_url, headers=headers, json=payload, timeout=8)
+            print(f"Trying External API: {api_url}")
+            response = requests.post(api_url, headers=headers, json=payload, timeout=5)
             
-            # Agar server 200 OK de raha hai tabhi JSON decode karo
             if response.status_code == 200:
                 data = response.json()
-                
-                # Success Logic
                 if 'url' in data:
-                    print(f"✅ Success on {api_url}")
                     return data['url']
-                elif 'status' in data and data['status'] in ['stream', 'redirect']:
-                    print(f"✅ Success (Stream) on {api_url}")
-                    return data['url']
-            else:
-                print(f"❌ Server {api_url} returned status: {response.status_code}")
-
         except Exception as e:
-            # Agar connection fail ho jaye to error print karo aur next server par jao
-            print(f"⚠️ Error connecting to {api_url}: {e}")
+            print(f"API Failed ({api_url}): {e}")
             continue
-
+            
     return None
 
+# --- 2. INTERNAL ENGINE METHOD (Backup: Khud Link Nikalo) ---
+def try_internal_ytdlp(url):
+    print("APIs failed. Starting Internal Engine (yt-dlp)...")
+    try:
+        ydl_opts = {
+            'format': 'best',       # Best quality
+            'quiet': True,          # Logs kam karo
+            'no_warnings': True,
+            'extract_flat': False,  # Pura info nikalo
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            # Link dhoondo
+            if 'url' in info:
+                return info['url']
+            elif 'entries' in info:
+                # Kabhi kabhi playlist hoti hai
+                return info['entries'][0]['url']
+                
+    except Exception as e:
+        print(f"Internal Engine Failed: {e}")
+        return None
+
+# --- ROUTES ---
 @app.route('/')
 def home():
-    return "VideosSonic Backend is Running!"
+    return "VideosSonic Hybrid Backend is Running!"
 
 @app.route('/download', methods=['POST'])
 def get_video():
@@ -70,14 +79,19 @@ def get_video():
     if not video_url:
         return jsonify({"error": "No URL provided"}), 400
 
-    print(f"Processing Request for: {video_url}")
-    direct_link = cobalt_download(video_url)
+    print(f"Processing: {video_url}")
+    
+    # 1. Pehle API Try karo (Fast)
+    direct_link = try_cobalt_api(video_url)
+    
+    # 2. Agar API fail ho, to apna engine chalao (Reliable)
+    if not direct_link:
+        direct_link = try_internal_ytdlp(video_url)
     
     if direct_link:
         return jsonify({"status": "success", "download_url": direct_link})
     else:
-        # Agar saare servers fail ho jayen
-        return jsonify({"status": "error", "message": "All servers are busy. Please try again later."}), 500
+        return jsonify({"status": "error", "message": "Could not fetch video. Server might be blocked."}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
