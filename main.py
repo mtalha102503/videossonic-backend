@@ -7,12 +7,16 @@ app = Flask(__name__)
 CORS(app)
 
 def cobalt_download(url):
-    # Bilkul naye aur active servers ki list (Updated Dec 2025)
+    # Updated List of Working Cobalt Instances (Dec 2025)
+    # Hum 'Shotgun Method' use kar rahe hain - jo chal gaya wo best!
     servers = [
-        "https://cobalt.lacwx.net/api/json",      # Reliable Server 1
-        "https://api.cobalt.mashed.pw/api/json",  # Reliable Server 2
-        "https://cobalt.q1.dj/api/json",          # Backup Server 3
-        "https://cobalt.stream/api/json"          # Backup Server 4
+        "https://cobalt.jas.bio/api/json",         # Server 1
+        "https://cobalt.zip/api/json",             # Server 2
+        "https://wuk.sh/api/json",                 # Server 3 (Classic)
+        "https://cobalt.kwiatekmiki.pl/api/json",  # Server 4 (Fixed URL)
+        "https://api.cobalt.kwiatekmiki.pl/api/json", # Server 5 (Alt URL)
+        "https://cobalt.154.53.53.53.nip.io/api/json", # Server 6 (IP Based - often reliable)
+        "https://cobalt.nao.20041124.xyz/api/json" # Server 7
     ]
     
     headers = {
@@ -23,36 +27,36 @@ def cobalt_download(url):
     
     payload = {
         "url": url,
-        # 'vQuality' hata dia kyunki naye servers 'filenamePattern' prefer krte hain
         "filenamePattern": "basic"
     }
 
-    # Loop chalayenge: Bari bari sabko try karenge
+    # Loop through all servers
     for api_url in servers:
         try:
             print(f"Trying server: {api_url}") 
-            response = requests.post(api_url, headers=headers, json=payload, timeout=15)
-            data = response.json()
+            # Timeout kam rakha hai taki jaldi agla server try kare
+            response = requests.post(api_url, headers=headers, json=payload, timeout=8)
             
-            # Debugging ke liye print
-            # print(f"Response from {api_url}: {data}")
+            # Agar server 200 OK de raha hai tabhi JSON decode karo
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Success Logic
+                if 'url' in data:
+                    print(f"✅ Success on {api_url}")
+                    return data['url']
+                elif 'status' in data and data['status'] in ['stream', 'redirect']:
+                    print(f"✅ Success (Stream) on {api_url}")
+                    return data['url']
+            else:
+                print(f"❌ Server {api_url} returned status: {response.status_code}")
 
-            # Check karo agar URL mila ya status 'stream'/'redirect' hai
-            if 'url' in data:
-                return data['url']
-            elif 'status' in data and data['status'] == 'stream':
-                return data['url']
-            elif 'status' in data and data['status'] == 'redirect':
-                return data['url']
-            
-            # Agar server ne mana kia
-            print(f"Failed on {api_url}: {data}")
-            
         except Exception as e:
-            print(f"Error connecting to {api_url}: {e}")
-            continue # Agle server par jao
+            # Agar connection fail ho jaye to error print karo aur next server par jao
+            print(f"⚠️ Error connecting to {api_url}: {e}")
+            continue
 
-    return None # Agar sab fail ho gaye
+    return None
 
 @app.route('/')
 def home():
@@ -66,13 +70,14 @@ def get_video():
     if not video_url:
         return jsonify({"error": "No URL provided"}), 400
 
-    print(f"Processing URL: {video_url}") 
+    print(f"Processing Request for: {video_url}")
     direct_link = cobalt_download(video_url)
     
     if direct_link:
         return jsonify({"status": "success", "download_url": direct_link})
     else:
-        return jsonify({"status": "error", "message": "Servers busy. Please try again."}), 500
+        # Agar saare servers fail ho jayen
+        return jsonify({"status": "error", "message": "All servers are busy. Please try again later."}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
