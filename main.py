@@ -8,7 +8,8 @@ app = Flask(__name__)
 CORS(app) 
 
 def cobalt_download(url):
-    api_url = "https://api.cobalt.tools/api/json"
+    # Backup instance try kar rahe hain
+api_url = "https://cobalt.api.kwiatekmiki.pl/api/json"
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json"
@@ -48,3 +49,4 @@ if __name__ == '__main__':
     # Render dynamic port use karta hai, isliye os.environ.get zaroori hai
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+
