@@ -4,20 +4,23 @@ import requests
 import os
 
 app = Flask(__name__)
-# CORS enable kr rahe hain taki Hostinger se request block na ho
-CORS(app) 
+# CORS enable kar rahe hain taki Hostinger se request block na ho
+CORS(app)
 
 def cobalt_download(url):
     # Backup instance try kar rahe hain
-api_url = "https://cobalt.api.kwiatekmiki.pl/api/json"
+    api_url = "https://cobalt.api.kwiatekmiki.pl/api/json"
+    
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
+    
     payload = {
         "url": url,
         "vQuality": "max"
     }
+    
     try:
         response = requests.post(api_url, headers=headers, json=payload)
         data = response.json()
@@ -46,7 +49,6 @@ def get_video():
         return jsonify({"status": "error", "message": "Could not fetch video"}), 500
 
 if __name__ == '__main__':
-    # Render dynamic port use karta hai, isliye os.environ.get zaroori hai
+    # Render dynamic port use karta hai
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-
